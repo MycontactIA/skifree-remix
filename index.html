@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkiFree Remix</title>
+<style>
+  body { margin: 0; background: #1b2a3a; color: #fff; font-family: system-ui, sans-serif;
+         display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  #hud { width: 800px; max-width: 100vw; display: flex; justify-content: space-between;
+         padding: 8px 12px; box-sizing: border-box; font-size: 18px; }
+  canvas { background: #eef6ff; max-width: 100vw; height: auto; border: 4px solid #0d1520; }
+  p { font-size: 14px; color: #b8c7d9; max-width: 800px; padding: 0 12px; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <span id="nivel"></span>
+  <span id="tiempo"></span>
+  <span id="puntos"></span>
+</div>
+<canvas id="c" width="800" height="600"></canvas>
+<p>Controles: ← → para moverte, ↓ para ir más rápido, ↑ para frenar. Pasa entre cada par de banderas para sumar 100 puntos. Chocar con un árbol o roca te frena un momento y acerca al yeti. Si el yeti te alcanza, pierdes. Llega a la meta antes de que se acabe el tiempo. Enter o Espacio para continuar.</p>
+
+<script>
+const W = 800, H = 600, PLAYER_Y = 200;
+
+const LEVELS = [
+  { nombre: 'Nivel 1: Bosque suave',       largo: 9000,  tiempo: 90, densidad: 0.10, yeti: 3.7 },
+  { nombre: 'Nivel 2: Bosque denso',       largo: 12000, tiempo: 110, densidad: 0.18, yeti: 3.9 },
+  { nombre: 'Nivel 3: Tormenta de árboles', largo: 15000, tiempo: 130, densidad: 0.26, yeti: 4.1 },
+];
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const elNivel = document.getElementById('nivel');
+const elTiempo = document.getElementById('tiempo');
+const elPuntos = document.getElementById('puntos');
+
+let lvl = 0, state = 'play', msg = '', msgSub = '';
+let totalScore = 0, score = 0;
+let P, obs, flags, yeti, timeLeft, stun;
+const keys = {};
+
+// Nieve de fondo: puntos fijos que se mueven con el esquiador
+const snow = Array.from({ length: 80 }, () => ({ x: Math.random() * W, y: Math.random() * H, s: 1 + Math.random() * 2 }));
+
+function generar(L) {
+  obs = [];
+  flags = [];
+  // Un obstáculo cada 40 px de recorrido, con probabilidad según la densidad del nivel
+  for (let y = 350; y < L.largo - 150; y += 40) {
+    if (Math.random() < L.densidad) {
+      const tipo = Math.random() < 0.75 ? 'arbol' : 'roca';
+      obs.push({ x: 30 + Math.random() * (W - 60), y: y + Math.random() * 30, tipo, r: tipo === 'arbol' ? 16 : 12, hit: false });
+    }
+    if (Math.random() < 0.035) {
+      const cx = 160 + Math.random() * (W - 320);
+      flags.push({ y: y + 10, l: cx - 70, r: cx + 70, hecho: false });
+    }
+  }
+}
+
+function iniciarNivel(i) {
+  const L = LEVELS[i];
+  P = { x: W / 2, y: 0 };
+  generar(L);
+  yeti = null;
+  stun = 0;
+  timeLeft = L.tiempo * 60;
+  score = 0;
+  state = 'play';
+  msg = '';
+  msgSub = '';
+}
+
+function terminar(texto, sub) {
+  state = 'over';
+  msg = texto;
+  msgSub = sub;
+}
+
+function actualizar() {
+  if (state !== 'play') return;
+  const L = LEVELS[lvl];
+
+  timeLeft--;
+  if (timeLeft <= 0) return terminar('¡Se acabó el tiempo!', 'Enter o Espacio para reintentar el nivel');
+
+  // Velocidad vertical: normal 4, abajo 7, arriba 2
+  let v = 4;
+  if (keys.ArrowDown) v = 7;
+  if (keys.ArrowUp) v = 2;
+
+  if (stun > 0) {
+    stun--;
+    v = 0.5;
+  } else {
+    if (keys.ArrowLeft) P.x -= 4;
+    if (keys.ArrowRight) P.x += 4;
+    P.x = Math.max(20, Math.min(W - 20, P.x));
+  }
+
+  const prevY = P.y;
+  P.y += v;
+
+  // Banderas: sumar puntos al cruzarlas por dentro
+  for (const f of flags) {
+    if (!f.hecho && prevY < f.y && P.y >= f.y) {
+      f.hecho = true;
+      if (P.x > f.l && P.x < f.r) { score += 100; }
+    }
+  }
+
+  // Obstáculos: chocar frena y acerca al yeti
+  for (const o of obs) {
+    if (o.hit) continue;
+    if (Math.abs(P.x - o.x) < o.r + 8 && Math.abs(P.y - o.y) < o.r + 12) {
+      o.hit = true;
+      stun = 50;
+      if (yeti) yeti.y += 120;
+    }
+  }
+
+  // El yeti aparece a mitad del nivel, detrás del esquiador
+  if (!yeti && P.y >= L.largo * 0.5) {
+    yeti = { x: P.x, y: P.y - 450 };
+  }
+  if (yeti) {
+    yeti.y += L.yeti + lvl * 0.2;
+    yeti.x += Math.max(-2, Math.min(2, (P.x - yeti.x) * 0.03));
+    if (yeti.y >= P.y - 25) return terminar('¡El yeti te atrapó!', 'Enter o Espacio para reintentar el nivel');
+  }
+
+  // Meta
+  if (P.y >= L.largo) {
+    state = 'fin';
+    const bonus = Math.floor(timeLeft / 60) * 10;
+    score += bonus;
+    totalScore += score;
+    msg = '¡Meta!';
+    msgSub = `Puntos del nivel: ${score} (incluye ${bonus} de bonus por tiempo). Enter o Espacio para seguir.`;
+  }
+}
+
+function sy(y) { return y - P.y + PLAYER_Y; }
+
+function dibujarArbol(x, y) {
+  ctx.fillStyle = '#2d6a3a';
+  ctx.beginPath(); ctx.moveTo(x, y - 34); ctx.lineTo(x - 16, y + 4); ctx.lineTo(x + 16, y + 4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#5a3a1e';
+  ctx.fillRect(x - 3, y + 4, 6, 8);
+}
+
+function dibujarRoca(x, y) {
+  ctx.fillStyle = '#7a7f87';
+  ctx.beginPath(); ctx.ellipse(x, y, 12, 8, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+function dibujarYeti(x, y) {
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#8fa3b8';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(x, y, 26, 34, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#c0392b';
+  ctx.beginPath(); ctx.arc(x - 9, y - 10, 4, 0, Math.PI * 2); ctx.arc(x + 9, y - 10, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#222';
+  ctx.beginPath(); ctx.ellipse(x, y + 10, 10, 6, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+function dibujarEsquiador(x, y) {
+  // Esquís
+  ctx.strokeStyle = '#f1c40f';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(x - 12, y + 10); ctx.lineTo(x + 12, y + 10); ctx.stroke();
+  // Cuerpo y gorro
+  ctx.fillStyle = '#c0392b';
+  ctx.fillRect(x - 6, y - 8, 12, 16);
+  ctx.fillStyle = '#f5cba7';
+  ctx.beginPath(); ctx.arc(x, y - 12, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#c0392b';
+  ctx.fillRect(x - 5, y - 17, 10, 4);
+  if (stun > 0) {
+    ctx.fillStyle = '#f39c12';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('✦ ✦', x - 12, y - 24);
+  }
+}
+
+function dibujar() {
+  const L = LEVELS[lvl];
+
+  // Fondo y nieve
+  ctx.fillStyle = '#eef6ff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#ffffff';
+  for (const s of snow) {
+    const y = ((s.y - P.y * 0.5) % H + H) % H;
+    ctx.fillRect(s.x, y, s.s, s.s);
+  }
+
+  // Meta
+  const yMeta = sy(L.largo);
+  if (yMeta > -20 && yMeta < H + 20) {
+    for (let i = 0; i < W / 20; i++) {
+      ctx.fillStyle = i % 2 ? '#111' : '#fff';
+      ctx.fillRect(i * 20, yMeta - 6, 20, 12);
+    }
+  }
+
+  // Banderas
+  for (const f of flags) {
+    const y = sy(f.y);
+    if (y < -20 || y > H + 20) continue;
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(f.l, y); ctx.lineTo(f.l, y - 22); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(f.r, y); ctx.lineTo(f.r, y - 22); ctx.stroke();
+    ctx.fillStyle = f.hecho ? '#7f8c8d' : '#e74c3c';
+    ctx.fillRect(f.l, y - 22, 10, 8);
+    ctx.fillStyle = f.hecho ? '#7f8c8d' : '#2980b9';
+    ctx.fillRect(f.r - 10, y - 22, 10, 8);
+  }
+
+  // Obstáculos
+  for (const o of obs) {
+    const y = sy(o.y);
+    if (y < -40 || y > H + 40) continue;
+    if (o.tipo === 'arbol') dibujarArbol(o.x, y); else dibujarRoca(o.x, y);
+  }
+
+  // Yeti y esquiador
+  if (yeti) dibujarYeti(yeti.x, sy(yeti.y));
+  dibujarEsquiador(P.x, PLAYER_Y);
+
+  // HUD
+  elNivel.textContent = L.nombre;
+  elTiempo.textContent = 'Tiempo: ' + Math.max(0, Math.ceil(timeLeft / 60)) + ' s';
+  elPuntos.textContent = 'Puntos: ' + (totalScore + score);
+
+  // Mensajes
+  if (state !== 'play') {
+    ctx.fillStyle = 'rgba(13,21,32,0.8)';
+    ctx.fillRect(120, 220, W - 240, 160);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 30px sans-serif';
+    ctx.fillText(msg, W / 2, 275);
+    ctx.font = '16px sans-serif';
+    wrapTexto(msgSub, W / 2, 310, W - 300, 22);
+    ctx.textAlign = 'left';
+  }
+}
+
+function wrapTexto(texto, x, y, maxW, lineH) {
+  const palabras = texto.split(' ');
+  let linea = '';
+  for (const p of palabras) {
+    const prueba = linea + p + ' ';
+    if (ctx.measureText(prueba).width > maxW && linea) {
+      ctx.fillText(linea, x, y);
+      linea = p + ' ';
+      y += lineH;
+    } else {
+      linea = prueba;
+    }
+  }
+  ctx.fillText(linea, x, y);
+}
+
+addEventListener('keydown', e => {
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) e.preventDefault();
+  keys[e.key] = true;
+
+  if (e.key === 'Enter' || e.key === ' ') {
+    if (state === 'fin') {
+      if (lvl + 1 < LEVELS.length) {
+        lvl++;
+        iniciarNivel(lvl);
+      } else {
+        state = 'win';
+        msg = '¡Llegaste a la cima!';
+        msgSub = `Puntos totales: ${totalScore}. Enter o Espacio para jugar de nuevo.`;
+      }
+    } else if (state === 'over') {
+      totalScore -= 0;
+      iniciarNivel(lvl);
+    } else if (state === 'win') {
+      lvl = 0;
+      totalScore = 0;
+      iniciarNivel(lvl);
+    }
+  }
+});
+addEventListener('keyup', e => { keys[e.key] = false; });
+
+function bucle() {
+  actualizar();
+  dibujar();
+  requestAnimationFrame(bucle);
+}
+
+iniciarNivel(lvl);
+bucle();
+</script>
+</body>
+</html>
