@@ -8,10 +8,25 @@ Abre `index.html` en un navegador. No necesita servidor ni instalación.
 
 ## Controles
 
+Con cámara (recomendado):
+
+- Mueve la cabeza a los lados para esquivar.
+- Acerca la cabeza a la pantalla para ir más rápido.
+- Aleja la cabeza de la pantalla para frenar.
+- Al empezar, centra la cabeza unos segundos para calibrar.
+
+Sin cámara, o si no se detecta tu cara:
+
 - ← →: moverte a los lados
 - ↓: ir más rápido
 - ↑: frenar
-- Enter o Espacio: continuar, o reintentar después de perder
+
+Enter o Espacio: continuar, o reintentar después de perder.
+
+## Energía y yeti
+
+- Ir rápido gasta energía. La energía se recupera cuando vas a velocidad normal.
+- La barra de la izquierda muestra la energía, y la de la derecha, qué tan cerca está el yeti.
 
 ## Reglas
 
@@ -32,8 +47,8 @@ Los niveles están en la lista `LEVELS` dentro de `index.html`. Puedes cambiar:
 
 ## Privacidad
 
-El juego no usa cámara, micrófono ni red. Todo corre en el navegador y no guarda datos.
+La cámara se usa solo para seguir la nariz en el navegador. No se graba, no se guarda y no se envía a ningún servidor. El detector de rostros (MediaPipe) se descarga de su CDN. No se usa micrófono.
 
 ## Estado
 
-Prototipo sin probar en navegadores reales. Se revisó la sintaxis del código, pero no se jugó en un navegador.
+Probado con un detector de rostros simulado en Chrome headless: sin errores de página, calibración correcta y render de la pantalla. No probado con la cámara real ni con el detector real, ni en Safari.
